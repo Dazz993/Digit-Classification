@@ -30,7 +30,7 @@ def train_one_epoch(model, criterion, optimizer, epoch, train_dataloader, cfg):
 
         # model execution
         input = input.to(device)
-        target = target.to(device).float().requires_grad_()
+        target = target.to(device)
         output = model(input)
 
         loss = criterion(output, target)
@@ -58,7 +58,7 @@ def train_one_epoch(model, criterion, optimizer, epoch, train_dataloader, cfg):
                   f'Time: {batch_time.val:.4f} ({batch_time.avg:.4f}),\t'
                   #   f'Data Time {data_time.val:.4f} ({data_time.avg:.4f})\t'
                   f'Loss: {losses.val:.4f} ({losses.avg:.4f}),\t'
-                  f'Acc: {acc.val:.4f} ({acc.avg:.4f})')
+                  f'Acc: {accs.val:.4f} ({accs.avg:.4f})')
 
     return losses.avg, accs.avg
 
@@ -79,7 +79,7 @@ def validate(model, criterion, epoch, test_dataloader, cfg):
 
         # model execution
         input = input.to(device)
-        target = target.to(device).float()
+        target = target.to(device)
         output = model(input)
         loss = criterion(output, target)
 
@@ -102,12 +102,12 @@ def validate(model, criterion, epoch, test_dataloader, cfg):
         #       f'Loss {losses.val:.4f} ({losses.avg:.4f})\t'
         #       f'f1_score {f1_micro.val:.4f} {f1_macro.val:.4f}')
 
-    print(f'\n * Epoch: {epoch}, Acc: {accs.avg:.4f}, test_loss: {losses.avg:.4f}')
+    print(f'* Epoch: {epoch}, Acc: {accs.avg:.4f}, test_loss: {losses.avg:.4f}\n')
 
     return losses.avg, accs.avg
 
 def train(model, criterion, optimizer, lr_scheduler, train_dataloader, test_dataloader, cfg):
-    best_test_acc, best_val_loss = 0, float('inf')
+    best_test_acc, best_test_loss = 0, float('inf')
     for epoch in range(cfg.epochs):
         train_loss, train_acc = train_one_epoch(model=model, criterion=criterion, optimizer=optimizer, epoch=epoch, train_dataloader=train_dataloader, cfg=cfg)
         test_loss, test_acc = validate(model=model, criterion=criterion, epoch=epoch, test_dataloader=test_dataloader, cfg=cfg)
@@ -131,9 +131,11 @@ def train(model, criterion, optimizer, lr_scheduler, train_dataloader, test_data
         is_best = False
         if test_acc > best_test_acc:
             best_test_acc = test_acc
-            best_val_loss = test_loss
+            best_test_loss = test_loss
             is_best = True
-        save_checkpoint(epoch, save_dict, is_best, cfg, path=f'./states/{cfg.network + time.strftime("_%Y_%m_%d_%H_%M_%S", time.localtime())}')
+        save_checkpoint(epoch, save_dict, is_best, cfg, path=cfg.checkpoint_path)
+
+    print(f"Best test loss: {best_test_loss:.8f}, best test accuracy: {best_test_acc:.8f}")
 
 if __name__ == '__main__':
     # parse arguments and load configs
@@ -143,7 +145,9 @@ if __name__ == '__main__':
     cfg = ObjectDict(cfg_dict)
     print(cfg)
 
+    # define some parameters
     device = 'cuda' if torch.cuda.is_available() else 'cpu'
+    cfg['checkpoint_path'] = f'./states/{cfg.network + time.strftime("_%Y_%m_%d_%H_%M_%S", time.localtime())}'
 
     # load dataset and dataloader
     train_dataset, test_dataset = get_dataset(path='./data/', preprocess=None)
@@ -155,7 +159,7 @@ if __name__ == '__main__':
     # define LogsiticRegreesion model
     model = LogsiticRegression(input_size=(3, 32, 32), num_classes=10).to(device)
     # define criterion
-    criterion = torch.nn.CrossEntropyLoss
+    criterion = torch.nn.CrossEntropyLoss()
     # define optimizer
     optimizer = torch.optim.AdamW(model.parameters(), lr=cfg.learning_rate)
     # define lr scheduler
