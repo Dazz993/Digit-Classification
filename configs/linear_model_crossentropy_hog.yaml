@@ -1,0 +1,10 @@
+network: 'LogisticRegressionWithHOG'
+multigpu: False
+epochs: 20
+batch_size: 128
+num_workers: 8
+learning_rate: 0.0001
+milestones: []
+gamma: 0.1
+print_frequency: 50
+feature_extraction: hog

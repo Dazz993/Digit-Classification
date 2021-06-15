@@ -1,1 +1,1 @@
-from .logsitic_regression import LogsiticRegression
+from .linear_model import LinearModel
