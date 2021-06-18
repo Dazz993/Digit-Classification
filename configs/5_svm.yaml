@@ -1,0 +1,2 @@
+network: 'svm'
+feature_extraction: hog

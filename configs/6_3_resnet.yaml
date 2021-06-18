@@ -1,0 +1,11 @@
+network: 'ResNet'
+layers: 152
+multigpu: False
+epochs: 45
+batch_size: 128
+num_workers: 4
+learning_rate: 0.01
+weight_decay: 0.01
+milestones: [15, 30]
+gamma: 0.1
+print_frequency: 50

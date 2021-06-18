@@ -1,0 +1,13 @@
+network: 'LinearModel_CrossEntropy_no_reg_HOG'
+multigpu: False
+epochs: 50
+batch_size: 128
+num_workers: 8
+learning_rate: 0.0001
+weight_decay: 0
+milestones: []
+gamma: 0.1
+print_frequency: 50
+regularization: -1
+lam: 0.01
+feature_extraction: hog
