@@ -20,12 +20,25 @@ def get_dataset(path='../data/', feature_extraction=None, **kwargs):
     if feature_extraction is None:
         train_dataset = SVHNDataset(root=path, split='train', transform=normalize)
         test_dataset = SVHNDataset(root=path, split='test', transform=normalize)
+        # train_dataset = SVHNDataset(root=path, split='train')
+        # test_dataset = SVHNDataset(root=path, split='test')
     elif feature_extraction in feature_extraction_dict:
         feature_extraction_func = feature_extraction_dict[feature_extraction]
         train_dataset = SVHNDataset(root=path, split='train', feature_extraction=feature_extraction_func, **kwargs)
         test_dataset = SVHNDataset(root=path, split='test', feature_extraction=feature_extraction_func, **kwargs)
     else:
         raise NotImplementedError
+
+    return train_dataset, test_dataset
+
+def get_VAE_dataset(path='../data/'):
+    # define normalization and transforms
+
+    train_dataset = SVHNDataset(root=path, split='train')
+    test_dataset = SVHNDataset(root=path, split='test')
+
+    train_dataset.data = train_dataset.data * 2 - 1
+    test_dataset.data = test_dataset.data * 2 - 1
 
     return train_dataset, test_dataset
 
@@ -69,6 +82,29 @@ class SVHNDataset(VisionDataset):
     def __len__(self):
         return len(self.data)
 
+def get_numpy_dataset(path='../data/', feature_extraction=None, **kwargs):
+    mean = [0.449, 0.450, 0.450]
+    std = [0.200, 0.199, 0.199]
+
+    if feature_extraction is None:
+        train_dataset = SVHNDataset(root=path, split='train')
+        test_dataset = SVHNDataset(root=path, split='test')
+        for i in range(3):
+            train_dataset.data[:, i, :, :] = (train_dataset.data[:, i, :, :] - mean[i]) / std[i]
+            test_dataset.data[:, i, :, :] = (test_dataset.data[:, i, :, :] - mean[i]) / std[i]
+            # train_dataset.data[:, i, :, :] = train_dataset.data[:, i, :, :] * 2 - 1
+            # test_dataset.data[:, i, :, :] = test_dataset.data[:, i, :, :] * 2 - 1
+        train_dataset.data = train_dataset.data.reshape(train_dataset.data.shape[0], -1)
+        test_dataset.data = test_dataset.data.reshape(test_dataset.data.shape[0], -1)
+    elif feature_extraction in feature_extraction_dict:
+        feature_extraction_func = feature_extraction_dict[feature_extraction]
+        train_dataset = SVHNDataset(root=path, split='train', feature_extraction=feature_extraction_func, **kwargs)
+        test_dataset = SVHNDataset(root=path, split='test', feature_extraction=feature_extraction_func, **kwargs)
+    else:
+        raise NotImplementedError
+
+    return train_dataset.data, train_dataset.labels, test_dataset.data, test_dataset.labels
 
 if __name__ == '__main__':
-    a, b = get_dataset(feature_extraction='hog', num_orientations=18)
+    # a, b, c, d = get_numpy_dataset(feature_extraction='hog', num_orientations=9, pixels_per_cell=(4, 4), cells_per_block=(2, 2))
+    a, b = get_dataset()

@@ -10,12 +10,20 @@ def logistic_regression_loss(input, target):
 
 
 def regularization_loss(model, lam=0.01, p=2):
+    assert p == 1 or p == 2
     weight_list = []
     for name, param in model.named_parameters():
         if 'weight' in name:
             weight_list.append(param)
 
-    weights = torch.tensor(weight_list)
-    loss = torch.norm(weights, p=p)
+    loss = 0
+    for weight in weight_list:
+        loss += _compute_ridge(weight) if p == 2 else _compute_lasso(weight)
 
     return lam * loss
+
+def _compute_lasso(tensor):
+    return torch.sum(torch.abs(tensor))
+
+def _compute_ridge(tensor):
+    return torch.sum(tensor ** 2)
