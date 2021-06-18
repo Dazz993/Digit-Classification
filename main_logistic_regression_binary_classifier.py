@@ -5,12 +5,14 @@ import argparse
 import torch.utils.data
 from tqdm import tqdm
 from time import perf_counter as t
+from torch.utils.tensorboard import SummaryWriter
 from models import LinearModel
 from utils.dataset import get_dataset
 from utils.metrics import binary_classifier_accuracy, accuracy
 from utils.utils import ObjectDict, AverageMeter, save_checkpoint
+from utils.losses import logistic_regression_loss, regularization_loss
 
-parser = argparse.ArgumentParser(description='Pytorch CelebA Implementation')
+parser = argparse.ArgumentParser(description='Pytorch Digit Classification Implementation')
 parser.add_argument('--cfg', default='', type=str, metavar='PATH',
                     help='path to configuration (default: none)')
 
@@ -19,6 +21,9 @@ def train_one_epoch(models, criterion, optimizers, epoch, train_dataloader, cfg)
     data_time = AverageMeter()
     losses = AverageMeter()
     accs = AverageMeter()
+
+    train_losses_per_model = [AverageMeter() for _ in range(10)]
+    train_accs_per_model = [AverageMeter() for _ in range(10)]
 
     for batch_idx, (input, target) in enumerate(train_dataloader):
         input = input.to(device)
@@ -36,14 +41,14 @@ def train_one_epoch(models, criterion, optimizers, epoch, train_dataloader, cfg)
 
             # model execution
             _target = torch.where(target == i, 1, 0).to(device)
-            # _target = _target.reshape(-1, 1).float()
-            # _target = _target.long()
-
-            print(_target.max(), _target.min())
+            _target = _target.reshape(-1, 1).float()
 
             output = model(input)
 
             loss = criterion(output, _target)
+            if cfg.regularization != -1:
+                loss += regularization_loss(model, lam=cfg.lam, p=cfg.regularization)
+
 
             # backpropagation
             optimizer.zero_grad()
@@ -59,6 +64,9 @@ def train_one_epoch(models, criterion, optimizers, epoch, train_dataloader, cfg)
             losses.update(loss, input.size(0))
             accs.update(acc, input.size(0))
 
+            train_losses_per_model[i].update(loss, input.size(0))
+            train_accs_per_model[i].update(loss, input.size(0))
+
             # process batch time
             batch_time.update(t() - end)
 
@@ -70,7 +78,7 @@ def train_one_epoch(models, criterion, optimizers, epoch, train_dataloader, cfg)
                   f'Loss: {losses.val:.4f} ({losses.avg:.4f}),\t'
                   f'Acc: {accs.val:.4f} ({accs.avg:.4f})')
 
-    return losses.avg, accs.avg, [models[i].state_dict() for i in range(10)]
+    return [train_losses_per_model[i].avg for i in range(10)], [train_accs_per_model[i].avg for i in range(10)], [models[i].state_dict() for i in range(10)]
 
 @torch.no_grad()
 def validate(models, criterion, epoch, test_dataloader, cfg):
@@ -86,8 +94,7 @@ def validate(models, criterion, epoch, test_dataloader, cfg):
             # model execution
             input = input.to(device)
             _target = torch.where(target == i, 1, 0).to(device)
-            # _target = _target.reshape(-1, 1).float()
-            # _target = _target.long()
+            _target = _target.reshape(-1, 1).float()
 
             output = model(input)
             loss = criterion(output, _target)
@@ -111,12 +118,13 @@ def validate(models, criterion, epoch, test_dataloader, cfg):
 
     return [losses[i].avg for i in range(10)], [accs[i].avg for i in range(10)]
 
-def train(models, criterion, optimizers, train_dataloader, test_dataloader, cfg):
+def train(models, criterion, optimizers, train_dataloader, test_dataloader, writer, cfg):
     best_test_acc = [0 for _ in range(10)]
     best_test_loss = [float('inf') for _ in range(10)]
     best_state_dicts = [models[i].state_dict() for i in range(10)]
+    best_acc_for_all = 0
     for epoch in range(cfg.epochs):
-        train_loss, train_acc, model_state_dicts = train_one_epoch(models=models, criterion=criterion, optimizers=optimizers, epoch=epoch, train_dataloader=train_dataloader, cfg=cfg)
+        train_losses, train_accs, model_state_dicts = train_one_epoch(models=models, criterion=criterion, optimizers=optimizers, epoch=epoch, train_dataloader=train_dataloader, cfg=cfg)
         test_losses, test_acces = validate(models=models, criterion=criterion, epoch=epoch, test_dataloader=test_dataloader, cfg=cfg)
 
         for i in range(10):
@@ -132,11 +140,20 @@ def train(models, criterion, optimizers, train_dataloader, test_dataloader, cfg)
             'state_dicts': best_state_dicts
         }
 
-        test_for_all(models=models, model_state_dicts=best_state_dicts, test_dataloader=test_dataloader, cfg=cfg)
+        for i in range(10):
+            writer.add_scalar(f'loss/train_loss/model_{i}', train_losses[i], epoch)
+            writer.add_scalar(f'loss/test_loss/model_{i}', test_losses[i], epoch)
 
-        save_checkpoint(epoch, save_dict, True, cfg, path=cfg.checkpoint_path)
+        print("Test for test dataset")
+        is_best = False
+        acc_for_all = test_for_all(models=models, model_state_dicts=best_state_dicts, test_dataloader=test_dataloader, cfg=cfg)
+        if acc_for_all > best_acc_for_all:
+            best_acc_for_all = acc_for_all
+            is_best = True
 
-    return best_test_acc, best_test_loss, best_state_dicts
+        save_checkpoint(epoch, save_dict, is_best, cfg, path=cfg.checkpoint_path)
+
+    return best_test_acc, best_test_loss, best_state_dicts, best_acc_for_all
 
 @torch.no_grad()
 def test_for_all(models, model_state_dicts, test_dataloader, cfg):
@@ -177,10 +194,14 @@ if __name__ == '__main__':
 
     # define some parameters
     device = 'cuda' if torch.cuda.is_available() else 'cpu'
-    cfg['checkpoint_path'] = f'./states/{cfg.network + time.strftime("_%Y_%m_%d_%H_%M_%S", time.localtime())}'
+    pid = cfg.network + time.strftime("_%Y_%m_%d_%H_%M_%S", time.localtime())
+    cfg['checkpoint_path'] = f'./states/{pid}'
+
+    # define summary write
+    writer = SummaryWriter(f'./docs/tensorboard_logs/{pid}')
 
     # load dataset and dataloader
-    train_dataset, test_dataset = get_dataset(path='./data/', feature_extraction=cfg.get('feature_extraction', None), pixels_per_cell=(2, 2), cells_per_block=(2, 2))
+    train_dataset, test_dataset = get_dataset(path='./data/', feature_extraction=cfg.get('feature_extraction', None), pixels_per_cell=(2, 2), cells_per_block=(3, 3))
     train_dataloader = torch.utils.data.DataLoader(dataset=train_dataset, batch_size=cfg.batch_size, shuffle=True,
                                                    num_workers=cfg.num_workers, pin_memory=True)
     test_dataloader = torch.utils.data.DataLoader(dataset=test_dataset, batch_size=cfg.batch_size, shuffle=False,
@@ -195,13 +216,15 @@ if __name__ == '__main__':
 
     # define criterion
     # criterion = torch.nn.BCEWithLogitsLoss()
-    criterion = torch.nn.NLLLoss()
+    criterion = logistic_regression_loss
     # define optimizer
     optimizers = []
     for i in range(10):
-        optimizer = torch.optim.AdamW(models[i].parameters(), lr=cfg.learning_rate)
+        optimizer = torch.optim.AdamW(models[i].parameters(), lr=cfg.learning_rate, weight_decay=cfg.weight_decay)
         optimizers.append(optimizer)
 
-    best_test_acc, best_test_loss, best_state_dicts = train(models=models, criterion=criterion, optimizers=optimizers, train_dataloader=train_dataloader, test_dataloader=test_dataloader, cfg=cfg)
+    best_test_acc, best_test_loss, best_state_dicts, best_acc_for_all = train(models=models, criterion=criterion, optimizers=optimizers, train_dataloader=train_dataloader, test_dataloader=test_dataloader, writer=writer, cfg=cfg)
 
-    test_for_all(models=models, model_state_dicts=best_state_dicts, test_dataloader=test_dataloader, cfg=cfg)
+    print(f"Best for all: {best_acc_for_all}")
+
+    # test_for_all(models=models, model_state_dicts=best_state_dicts, test_dataloader=test_dataloader, cfg=cfg)
